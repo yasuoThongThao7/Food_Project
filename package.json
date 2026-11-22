@@ -1,0 +1,12 @@
+{
+  "name": "da-nang-food-guide",
+  "private": true,
+  "scripts": {
+    "check:sync": ".\\Backend\\.venv\\Scripts\\python.exe .\\Backend\\server\\scripts\\check_contract.py && npx tsx .\\client\\scripts\\check-client.ts",
+    "test:e2e": "set VITE_API_URL=http://localhost:8000&& npm run build --prefix client && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "tsx": "^4.23.15"
+  }
+}
