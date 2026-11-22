@@ -46,6 +46,7 @@ def test_auth_rechecks_banned_status(client):
 def test_public_food_restaurant_articles_and_missing_items(client):
     health = client.get("/health").json()
     assert health["data"] == {"status": "ok"}
+    assert client.get("/api/health").json() == health
     assert "meta" not in health
     assert client.get("/foods").json()["meta"]["total"] == 1
     assert client.get("/foods?limit=0").status_code == 400

@@ -10,7 +10,7 @@ No Google APIs anywhere. Maps = Leaflet + OSM tiles only. Geocoding = Nominatim 
 - Pagination: ?page=1&limit=12 (limit<=50) -> meta:{page,limit,total}
 - Auth: Authorization: Bearer <JWT 7d>. Roles USER|ADMIN. The auth dependency re-checks DB on every request: banned user -> 403 BANNED (message includes banReason). Optional-auth dependency for public routes that personalize.
 - IDs are integers. Dates ISO strings. UI language Vietnamese; API messages Vietnamese, codes English.
-- API prefix: none (routes exactly as listed). OpenAPI at /openapi.json is used by the sync checker, so every route must declare its path exactly as below and use tags.
+- API prefix: none in the canonical routes listed below. Vercel also mounts these routes under `/api` for service routing; the client calls this prefix. OpenAPI at /openapi.json is used by the sync checker, so every canonical route must declare its path exactly as below and use tags.
 
 # Database (SQLAlchemy models, table names plural snake_case)
 User(id, email unique, password_hash, name, role[USER|ADMIN] default USER, is_banned false, ban_reason?, created_at)

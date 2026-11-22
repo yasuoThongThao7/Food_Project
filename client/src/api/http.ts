@@ -16,7 +16,8 @@ export class ApiError extends Error {
   }
 }
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+const API_PREFIX = '/api';
 const TOKEN_KEY = 'dnfg_token';
 
 export function getToken(): string | null {
@@ -43,7 +44,7 @@ export async function request<T>(
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  const response = await fetch(`${API_URL}${API_PREFIX}${path}`, { ...init, headers });
   let envelope: Envelope<T>;
   try {
     envelope = (await response.json()) as Envelope<T>;
