@@ -113,6 +113,8 @@ class SearchHistory(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     detected_food_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    image_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     __table_args__ = (Index("ix_search_histories_user_created", "user_id", "created_at"),)
 

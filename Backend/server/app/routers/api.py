@@ -5,13 +5,16 @@ import time
 from datetime import date as date_type
 from datetime import timedelta
 from typing import Any
-
+import logging
 import httpx
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
+import io
+import uuid
+from pathlib import Path
+from PIL import Image, ImageOps
 from app.adapters import ai_itinerary, ai_search
 from app.core.deps import admin_user, current_user, optional_user
 from app.core.envelope import Envelope
@@ -42,12 +45,15 @@ from app.schemas import (
     ReviewInput,
 )
 from app.services.itinerary_fallback import SLOTS
+# Import hàm xử lý AI đã được tách ra
+from app.services.ai_service import process_image_and_predict
 
 router = APIRouter()
 auth_attempts: dict[str, list[float]] = {}
 _geocode_lock = threading.Lock()
 _last_geocode = 0.0
 _BBOX = (15.9, 16.2, 107.9, 108.35)
+logger = logging.getLogger(__name__)
 
 
 def success(data: Any, meta: dict[str, int] | None = None) -> dict[str, Any]:
@@ -296,6 +302,8 @@ def search_history(
                     for food_id in row.detected_food_ids
                     if (food := db.get(Food, food_id)) is not None
                 ],
+                "imageUrl": f"/uploads/{row.image_path}" if row.image_path else None,
+                "result": row.result_json,
             }
             for row in rows
         ]
@@ -307,9 +315,12 @@ def clear_search_history(
     db: Session = Depends(get_db), user: User = Depends(current_user)
 ) -> dict[str, Any]:
     rows = db.scalars(select(SearchHistory).where(SearchHistory.user_id == user.id)).all()
+    image_paths = [row.image_path for row in rows if row.image_path]
     for row in rows:
         db.delete(row)
     db.commit()
+    for path in image_paths:
+        (UPLOAD_ROOT / path).unlink(missing_ok=True)
     return success({"deleted": len(rows)})
 
 
@@ -1004,3 +1015,85 @@ def delete_article(
 @router.get("/health", tags=["health"], response_model=Envelope[dict[str, str]])
 def health() -> dict[str, Any]:
     return success({"status": "ok"})
+
+
+UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads"   # server/uploads
+PREDICTION_DIR = UPLOAD_ROOT / "predictions"
+MAX_PREDICT_IMAGE_BYTES = 10 * 1024 * 1024
+_ai_lock = threading.Lock()
+
+
+def _run_prediction(image_bytes: bytes) -> dict[str, Any]:
+    # Nạp lười: thiếu file model thì chỉ endpoint này lỗi 503, app vẫn khởi động bình thường
+    try:
+        from app.services.ai_service import process_image_and_predict
+    except (FileNotFoundError, ImportError) as exc:
+        logger.error("AI service unavailable: %s", exc)
+        raise ApiError(503, "AI_UNAVAILABLE", "Dịch vụ nhận diện tạm thời không khả dụng") from exc
+    with _ai_lock:  # tránh nhiều luồng cùng chạy YOLO/CNN một lúc
+        return process_image_and_predict(image_bytes)
+
+
+def _save_prediction_image(image_bytes: bytes) -> str:
+    PREDICTION_DIR.mkdir(parents=True, exist_ok=True)
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
+    name = f"{uuid.uuid4().hex}.jpg"
+    image.save(PREDICTION_DIR / name, "JPEG", quality=90, optimize=True)
+    return f"predictions/{name}"
+
+
+@router.post("/predict", tags=["search"], response_model=Envelope[dict[str, Any]])
+def predict_food(
+    file: UploadFile = File(...),
+    user: User | None = Depends(optional_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    # 1. Kiểm tra định dạng file
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise ApiError(400, "VALIDATION", "Vui lòng tải lên file hình ảnh hợp lệ.")
+
+    # 2. Đọc file dưới dạng bytes (giới hạn 10MB)
+    image_bytes = file.file.read(MAX_PREDICT_IMAGE_BYTES + 1)
+    if len(image_bytes) > MAX_PREDICT_IMAGE_BYTES:
+        raise ApiError(400, "VALIDATION", "Ảnh phải có dung lượng tối đa 10MB")
+
+    # 3. Gọi hàm xử lý AI từ service
+    try:
+        result = _run_prediction(image_bytes)
+    except ValueError as exc:  # lỗi đọc ảnh từ ai_service
+        raise ApiError(400, "VALIDATION", str(exc)) from exc
+    except ApiError:
+        raise
+    except Exception as exc:
+        logger.exception("Prediction error")
+        raise ApiError(500, "INTERNAL", "Đã có lỗi xảy ra trong quá trình nhận diện.") from exc
+
+    # 4. Đã đăng nhập và nhận diện được món -> lưu lịch sử (lỗi lưu không làm hỏng kết quả)
+    if user and result.get("success"):
+        image_path: str | None = None
+        try:
+            names = [dish["class_name"] for dish in result["dishes"]]
+            food_ids = {
+                food.ai_label: food.id
+                for food in db.scalars(
+                    select(Food).where(Food.ai_label.in_(names), Food.is_active.is_(True))
+                )
+            }
+            image_path = _save_prediction_image(image_bytes)
+            history = SearchHistory(
+                user_id=user.id,
+                detected_food_ids=[food_ids[name] for name in names if name in food_ids],
+                image_path=image_path,
+                result_json=result,
+            )
+            db.add(history)
+            db.commit()
+            db.refresh(history)
+            result = {**result, "history_id": history.id, "image_url": f"/uploads/{image_path}"}
+        except Exception:
+            db.rollback()
+            if image_path:
+                (UPLOAD_ROOT / image_path).unlink(missing_ok=True)
+            logger.exception("Could not save prediction history")
+
+    return success(result)

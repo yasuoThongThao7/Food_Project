@@ -7,9 +7,13 @@ from app.core.errors import ApiError
 from app.db import get_db
 from app.models import User
 
+from fastapi.security import HTTPBearer
 
+_bearer = HTTPBearer(auto_error=False)  # chỉ để Swagger hiện nút Authorize
 def optional_user(
-    authorization: str | None = Header(default=None), db: Session = Depends(get_db)
+    authorization: str | None = Header(default=None, include_in_schema=False),
+    db: Session = Depends(get_db),
+    _scheme: object = Depends(_bearer),
 ) -> User | None:
     if not authorization:
         return None
@@ -17,7 +21,9 @@ def optional_user(
 
 
 def current_user(
-    authorization: str | None = Header(default=None), db: Session = Depends(get_db)
+    authorization: str | None = Header(default=None, include_in_schema=False),
+    db: Session = Depends(get_db),
+    _scheme: object = Depends(_bearer),
 ) -> User:
     if not authorization:
         raise ApiError(401, "UNAUTHORIZED", "Vui lòng đăng nhập")

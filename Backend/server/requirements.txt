@@ -11,3 +11,9 @@ python-multipart>=0.0.9
 httpx>=0.27
 pytest>=8.3
 ruff>=0.6
+pillow==13.0.0
+python-multipart==0.0.34
+torch==2.15.0
+torchvision==0.29.2
+ultralytics==8.4.216
+
