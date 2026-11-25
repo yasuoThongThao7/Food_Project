@@ -46,6 +46,7 @@ class BanInput(InputModel):
 
 class ItineraryInput(InputModel):
     date: str | None = None
+    force_new: bool = False
 
 
 class FoodInput(InputModel):

@@ -150,6 +150,14 @@ def test_itinerary_invalid_ai_falls_back_and_cache_does_not_call_again(client, m
     assert first.json()["data"]["source"] == "FALLBACK"
     assert second.json()["data"]["id"] == first.json()["data"]["id"]
     assert len(calls) == 1
+    regenerated = client.post(
+        "/itinerary/generate",
+        headers=auth(jwt),
+        json={"date": day, "forceNew": True},
+    )
+    assert regenerated.status_code == 200
+    assert regenerated.json()["data"]["id"] != first.json()["data"]["id"]
+    assert len(calls) == 2
     assert client.get("/itinerary", headers=auth(jwt)).status_code == 200
     assert (
         client.get(f"/itinerary/{first.json()['data']['id']}", headers=auth(jwt)).status_code == 200

@@ -696,7 +696,10 @@ def generate_itinerary(
     context = _candidate_payload(db, user)
     ai_payload: dict[str, Any] = {"date": chosen_date.isoformat(), "slots": list(SLOTS), **context}
     encoded = json.dumps(ai_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    input_hash = hashlib.sha1(f"{user.id}{chosen_date.isoformat()}{encoded}".encode()).hexdigest()
+    hash_input = f"{user.id}{chosen_date.isoformat()}{encoded}"
+    if payload.force_new:
+        hash_input += uuid.uuid4().hex
+    input_hash = hashlib.sha1(hash_input.encode()).hexdigest()
     cached = db.scalar(
         select(Itinerary).where(
             Itinerary.user_id == user.id,
@@ -705,6 +708,7 @@ def generate_itinerary(
         )
     )
     if cached:
+        logger.info("Returning cached %s itinerary id=%s", cached.source, cached.id)
         return success(_itinerary_json(db, cached))
     since = utcnow() - timedelta(hours=1)
     count = (
@@ -722,7 +726,12 @@ def generate_itinerary(
         if not _validate_ai_plan(plan, context["candidates"]):
             raise ValueError("Invalid AI plan")
         source = "AI"
-    except (ApiError, ValueError, TypeError, KeyError):
+    except (ApiError, ValueError, TypeError, KeyError) as exc:
+        logger.warning(
+            "Itinerary AI failed or returned an invalid plan (%s): %s; using FALLBACK",
+            type(exc).__name__,
+            getattr(exc, "message", str(exc)),
+        )
         from app.services.itinerary_fallback import build_fallback
 
         plan = build_fallback(ai_payload)

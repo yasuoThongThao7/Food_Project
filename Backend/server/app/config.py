@@ -14,9 +14,10 @@ class Settings(BaseSettings):
     ai_search_key: str = ""
     ai_itinerary_url: str = ""
     ai_itinerary_key: str = ""
+    ai_itinerary_model: str = ""
     ai_timeout_ms: int = 15000
     ai_min_conf: float = 0.4
-    mock_ai: bool = True
+    mock_ai: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

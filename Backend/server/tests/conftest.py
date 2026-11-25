@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.core.security import hash_password
 from app.db import Base, get_db
 from app.main import app
@@ -11,7 +12,8 @@ from app.models import Food, Restaurant, RestaurantFood, User
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(settings, "mock_ai", True)
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
