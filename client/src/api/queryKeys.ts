@@ -7,6 +7,7 @@ export const queryKeys = {
   reviews: (id: number, page: number) => ['reviews', id, page] as const,
   favorites: ['favorites'] as const,
   history: ['search-history'] as const,
+  predictionFoods: (labels: string[]) => ['prediction-foods', labels] as const,
   itineraries: ['itineraries'] as const,
   itinerary: (id: number) => ['itinerary', id] as const,
   articles: (page?: number) => ['articles', page] as const,

@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import {
   getArticles, getArticle, getFavorites, getFood, getFoods, getRestaurant, getRestaurants,
-  getReviews, removeFavorite, addFavorite, saveReview, searchImage, getSearchHistory, clearSearchHistory
+  getReviews, removeFavorite, addFavorite, saveReview, predictImage, getSearchHistory, clearSearchHistory
 } from '../api/endpoints';
 import { ApiError } from '../api/http';
 import { queryKeys } from '../api/queryKeys';
@@ -20,6 +20,10 @@ const categories = [
   ['noodle', 'Món nước'], ['seafood', 'Hải sản'], ['snack', 'Ăn vặt'],
   ['dessert', 'Tráng miệng'], ['drink', 'Đồ uống'], ['other', 'Đặc sản']
 ];
+
+function normalizeAiLabel(label: string): string {
+  return label.toLowerCase().replace(/[-\s]/g, '_');
+}
 
 export function HomePage() {
   const foods = useQuery({ queryKey: queryKeys.foods({ page: 1 }), queryFn: () => getFoods({ page: 1, limit: 4 }) });
@@ -66,13 +70,28 @@ export function SearchPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.history })
   });
   const search = useMutation({
-    mutationFn: async (image: File) => searchImage(await resizeImage(image)),
+    mutationFn: async (image: File) => predictImage(await resizeImage(image)),
     onSuccess: (result) => {
-      setSelected(result.foods[0]?.food.id ?? null);
+      setSelected(result.dishes[0]?.order ?? null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.history });
     }
   });
-  const chosen = search.data?.foods.find((match) => match.food.id === selected);
+  const detectedLabels = search.data?.dishes.map((dish) => dish.class_name) ?? [];
+  const foodCatalog = useQuery({
+    queryKey: queryKeys.predictionFoods(detectedLabels),
+    queryFn: () => getFoods({ page: 1, limit: 50 }),
+    enabled: Boolean(search.data?.success && detectedLabels.length)
+  });
+  const chosen = search.data?.dishes.find((dish) => dish.order === selected);
+  const chosenFood = chosen && foodCatalog.data?.items.find((food) => normalizeAiLabel(food.aiLabel) === normalizeAiLabel(chosen.class_name));
+  const chosenFoodDetail = useQuery({
+    queryKey: queryKeys.food(chosenFood?.id ?? 0),
+    queryFn: () => {
+      if (!chosenFood) throw new Error('Không tìm thấy món ăn trong danh mục.');
+      return getFood(chosenFood.id);
+    },
+    enabled: Boolean(chosenFood)
+  });
   const savedIds = new Set(favorites.data?.restaurants.map((restaurant) => restaurant.id) ?? []);
   const favoriteMutation = useMutation({
     mutationFn: (restaurant: Restaurant) => savedIds.has(restaurant.id)
@@ -84,6 +103,7 @@ export function SearchPage() {
   const setImage = (image: File | undefined) => {
     if (!image) return;
     if (!image.type.startsWith('image/')) { setFileError('Vui lòng chọn tệp hình ảnh.'); return; }
+    if (image.size > 10 * 1024 * 1024) { setFileError('Ảnh phải có dung lượng tối đa 10 MB.'); return; }
     setFileError('');
     setFile(image);
     setPreview(URL.createObjectURL(image));
@@ -99,7 +119,7 @@ export function SearchPage() {
     <div className="search-layout">
       <div className="search-main">
         <div className={`upload-box ${dragging ? 'dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
-          {preview ? <div className="upload-preview"><img src={preview} alt="Ảnh món ăn đã chọn" /><button className="remove-image" onClick={() => { setPreview(''); setFile(null); search.reset(); }}>Đổi ảnh</button></div> : <><div className="upload-icon">📸</div><h2>Chọn ảnh món ăn</h2><p>Kéo thả ảnh vào đây hoặc chụp ảnh trực tiếp</p><div className="upload-buttons"><button className="button primary" onClick={() => inputRef.current?.click()}>Chọn ảnh từ thiết bị</button><button className="button" onClick={() => { if (inputRef.current) { inputRef.current.setAttribute('capture', 'environment'); inputRef.current.click(); } }}>Chụp ảnh</button></div><span className="upload-caption">JPG, PNG hoặc WebP · tối đa 5 MB</span></>}
+          {preview ? <div className="upload-preview"><div className="prediction-image"><img src={preview} alt="Ảnh món ăn đã chọn" />{search.data?.dishes.map((dish) => <div key={dish.order} className="prediction-box" style={{ left: `${dish.box_percent.left}%`, top: `${dish.box_percent.top}%`, width: `${dish.box_percent.width}%`, height: `${dish.box_percent.height}%`, borderColor: dish.color }}><span style={{ backgroundColor: dish.color }}>{dish.class_name} · {dish.confidence}%</span></div>)}</div><button className="remove-image" onClick={() => { setPreview(''); setFile(null); search.reset(); }}>Đổi ảnh</button></div> : <><div className="upload-icon">📸</div><h2>Chọn ảnh món ăn</h2><p>Kéo thả ảnh vào đây hoặc chụp ảnh trực tiếp</p><div className="upload-buttons"><button className="button primary" onClick={() => inputRef.current?.click()}>Chọn ảnh từ thiết bị</button><button className="button" onClick={() => { if (inputRef.current) { inputRef.current.setAttribute('capture', 'environment'); inputRef.current.click(); } }}>Chụp ảnh</button></div><span className="upload-caption">JPG, PNG hoặc WebP · tối đa 10 MB</span></>}
           <input ref={inputRef} className="sr-only" type="file" accept="image/*" capture="environment" aria-label="Chọn hoặc chụp ảnh món ăn" onChange={(event) => setImage(event.target.files?.[0])} />
         </div>
         {fileError && <p className="form-error" role="alert">{fileError}</p>}
@@ -107,12 +127,15 @@ export function SearchPage() {
         {search.isPending && <div className="ai-progress"><div className="spinner" /><span>Đang tìm hương vị trong ảnh của bạn...</span></div>}
         {search.error && <div role="alert" className="inline-state error-state"><p>{search.error instanceof ApiError && search.error.code === 'AI_UNAVAILABLE' ? 'AI đang bận, thử lại nhé.' : search.error.message}</p><button className="button small" onClick={() => file && search.mutate(file)}>Thử lại</button></div>}
         {favoriteMutation.error && <p className="form-error" role="alert">{favoriteMutation.error.message}</p>}
-        {search.data && <section className="results-section"><div className="result-heading"><div><span className="eyebrow">Kết quả nhận diện</span><h2>Đây có thể là món gì?</h2></div></div>
-          {search.data.unmatched.length > 0 && <p className="unmatched-note">AI thấy nhưng chưa có trong hệ thống: {search.data.unmatched.join(', ')}</p>}
-          {search.data.foods.length === 0 ? <div className="inline-state"><span className="state-icon">🧐</span><h3>Chưa nhận ra món ăn này</h3><p>Thử chụp rõ món ăn hơn, đủ sáng và hạn chế đồ vật xung quanh nhé.</p></div> : <>
-            <div className="detected-chips">{search.data.foods.map(({ food, confidence }) => <button key={food.id} className={selected === food.id ? 'detected-chip active' : 'detected-chip'} onClick={() => setSelected(food.id)}><span>{food.name}</span><small>{Math.round(confidence * 100)}%</small></button>)}</div>
-            {chosen && <div className="instant-results"><div className="result-heading"><div><span className="eyebrow">Gần bạn có món này</span><h2>Quán bán {chosen.food.name}</h2></div><Link className="text-link" to={`/restaurants?foodId=${chosen.food.id}`}>Xem tất cả quán →</Link></div>
-              {chosen.restaurants.length ? <div className="restaurant-grid">{chosen.restaurants.map((restaurant) => <RestaurantCard key={restaurant.id} restaurant={restaurant} favorite={savedIds.has(restaurant.id)} onFavorite={(item) => { if (!localStorage.getItem('dnfg_token')) { navigate('/login'); return; } favoriteMutation.mutate(item); }} />)}</div> : <div className="inline-state"><p>Chưa tìm thấy quán phù hợp. Hãy thử món khác hoặc quay lại sau nhé!</p></div>}
+        {search.data && <section className="results-section"><div className="result-heading"><div><span className="eyebrow">Kết quả nhận diện</span><h2>{search.data.message}</h2></div></div>
+          {!search.data.success || search.data.require_retake ? <div className="inline-state"><span className="state-icon">🧐</span><h3>Chưa nhận ra món ăn này</h3><p>{search.data.message}</p></div> : <>
+            <div className="detected-chips">{search.data.dishes.map((dish) => {
+              const food = foodCatalog.data?.items.find((item) => normalizeAiLabel(item.aiLabel) === normalizeAiLabel(dish.class_name));
+              return <button key={dish.order} className={selected === dish.order ? 'detected-chip active' : 'detected-chip'} onClick={() => setSelected(dish.order)}><span>{food?.name ?? dish.class_name.replaceAll('_', ' ')}</span><small>{dish.confidence}%</small></button>;
+            })}</div>
+            {foodCatalog.data && search.data.dishes.some((dish) => !foodCatalog.data?.items.some((food) => normalizeAiLabel(food.aiLabel) === normalizeAiLabel(dish.class_name))) && <p className="unmatched-note">Một số món AI nhận diện chưa có trong danh mục món ăn.</p>}
+            {chosen && <div className="instant-results"><div className="result-heading"><div><span className="eyebrow">Kết quả nhận diện</span><h2>{chosenFood?.name ?? chosen.class_name.replaceAll('_', ' ')}</h2></div>{chosenFood && <Link className="text-link" to={`/restaurants?foodId=${chosenFood.id}`}>Xem tất cả quán →</Link>}</div>
+              {foodCatalog.isLoading || chosenFoodDetail.isLoading ? <div className="ai-progress"><div className="spinner" /><span>Đang tìm quán bán món này...</span></div> : foodCatalog.error ? <p className="form-error" role="alert">{foodCatalog.error.message}</p> : chosenFoodDetail.error ? <p className="form-error" role="alert">{chosenFoodDetail.error.message}</p> : chosenFoodDetail.data?.restaurants.length ? <div className="restaurant-grid">{chosenFoodDetail.data.restaurants.map((restaurant) => <RestaurantCard key={restaurant.id} restaurant={restaurant} favorite={savedIds.has(restaurant.id)} onFavorite={(item) => { if (!localStorage.getItem('dnfg_token')) { navigate('/login'); return; } favoriteMutation.mutate(item); }} />)}</div> : <div className="inline-state"><p>{chosenFood ? 'Chưa tìm thấy quán phù hợp với món này.' : 'Món AI nhận diện chưa có trong danh mục.'}</p></div>}
             </div>}
           </>}
         </section>}

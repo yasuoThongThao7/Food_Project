@@ -96,6 +96,7 @@ export function ItineraryPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [generated, setGenerated] = useState<Itinerary | null>(null);
   const [progress, setProgress] = useState(0);
+  const [generationNotice, setGenerationNotice] = useState('');
   const history = useQuery({ queryKey: queryKeys.itineraries, queryFn: getItineraries });
   const favorites = useQuery({ queryKey: queryKeys.favorites, queryFn: getFavorites });
   const searchHistory = useQuery({ queryKey: queryKeys.history, queryFn: getSearchHistory });
@@ -107,9 +108,14 @@ export function ItineraryPage() {
   const generate = useMutation({
     mutationFn: generateItinerary,
     onMutate: () => setProgress(0),
-    onSuccess: (itinerary) => {
+    onSuccess: (itinerary, input) => {
       setGenerated(itinerary);
       setActiveId(itinerary.id);
+      setGenerationNotice(input?.forceNew
+        ? itinerary.source === 'AI'
+          ? 'Đã tạo lộ trình mới bằng AI.'
+          : 'Đã tạo lộ trình mới theo đánh giá.'
+        : '');
       void client.invalidateQueries({ queryKey: queryKeys.itineraries });
     }
   });
@@ -125,13 +131,19 @@ export function ItineraryPage() {
     address: stop.restaurant.address, order: index + 1
   })), [sortedPlan]);
   const noPreferences = !favorites.data?.foods.length && !favorites.data?.restaurants.length && !searchHistory.data?.length;
-  const create = () => { setGenerated(null); setActiveId(null); generate.mutate({}); };
-  return <div className="content-page"><PageHeading eyebrow="Lịch trình ẩm thực" title="Một ngày ăn ngon ở Đà Nẵng" description="Lộ trình riêng với những món ngon và quán ăn địa phương." action={<button className="button primary" onClick={create} disabled={generate.isPending}>{generate.isPending ? 'Đang tạo...' : itinerary ? '↻ Tạo lại' : '✦ Tạo lộ trình hôm nay'}</button>} />
+  const create = (forceNew = false) => {
+    setGenerated(null);
+    setActiveId(null);
+    setGenerationNotice('');
+    generate.mutate(forceNew ? { forceNew: true } : {});
+  };
+  return <div className="content-page"><PageHeading eyebrow="Lịch trình ẩm thực" title="Một ngày ăn ngon ở Đà Nẵng" description="Lộ trình riêng với những món ngon và quán ăn địa phương." action={<button className="button primary" onClick={() => create(Boolean(itinerary))} disabled={generate.isPending}>{generate.isPending ? 'Đang tạo...' : itinerary ? '↻ Tạo lại' : '✦ Tạo lộ trình hôm nay'}</button>} />
     {noPreferences && <div className="hint-banner"><span>💡</span><p>Thêm món yêu thích, đánh giá quán hoặc tìm món bằng ảnh để gợi ý ngày càng hợp gu hơn nhé.</p></div>}
     {generate.isPending && <div className="generating-card"><div className="spinner" /><div><strong>Đang chuẩn bị hành trình ngon lành...</strong><p>Chúng mình đang chọn quán, cân đối thời gian và sắp xếp lộ trình. Thường mất khoảng 15 giây.</p><div className="progress-track"><span style={{ width: `${Math.min(progress / 15 * 100, 95)}%` }} /></div></div></div>}
-    {generate.error && <div className="inline-state error-state" role="alert"><p>{generate.error instanceof ApiError && generate.error.status === 429 ? 'Bạn tạo quá nhiều, thử lại sau nhé.' : generate.error.message}</p><button className="button small" onClick={() => generate.mutate({})}>Thử lại</button></div>}
+    {generate.error && <div className="inline-state error-state" role="alert"><p>{generate.error instanceof ApiError && generate.error.status === 429 ? 'Bạn tạo quá nhiều, thử lại sau nhé.' : generate.error.message}</p><button className="button small" onClick={() => create(Boolean(itinerary))}>Thử lại</button></div>}
+    {generationNotice && <p className="inline-state" role="status">{generationNotice}</p>}
     {itinerary && <><div className="itinerary-date"><span>{new Date(`${itinerary.date}T00:00:00`).toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span></div><div className="itinerary-layout"><div className="timeline">{sortedPlan.map((stop, index) => <StopCard key={`${stop.slot}-${stop.restaurant.id}`} stop={stop} order={index + 1} fallback={itinerary.source === 'FALLBACK'} />)}</div>{markers.length > 0 && <div className="itinerary-map"><MapPanel markers={markers} polyline /><p>Hành trình các quán theo thứ tự ghé thăm</p></div>}</div></>}
-    {!itinerary && !generate.isPending && !generate.error && <div className="itinerary-intro"><div className="itinerary-illustration">🗺️</div><h2>Sẵn sàng cho một ngày thật ngon?</h2><p>Để chúng mình chọn món ngon, quán thú vị và nối thành một hành trình vừa vặn.</p><button className="button primary" onClick={create}>Tạo lộ trình hôm nay ✦</button></div>}
+    {!itinerary && !generate.isPending && !generate.error && <div className="itinerary-intro"><div className="itinerary-illustration">🗺️</div><h2>Sẵn sàng cho một ngày thật ngon?</h2><p>Để chúng mình chọn món ngon, quán thú vị và nối thành một hành trình vừa vặn.</p><button className="button primary" onClick={() => create()}>Tạo lộ trình hôm nay ✦</button></div>}
     <section className="previous-trips"><div className="section-title"><div><span className="eyebrow">Những chuyến đi trước</span><h2>Lộ trình đã tạo</h2></div></div><DataState loading={history.isLoading} error={history.error} empty={!history.data?.length} retry={() => void history.refetch()}><div className="trip-list">{history.data?.map((trip) => <button key={trip.id} className={activeId === trip.id ? 'trip-item active' : 'trip-item'} onClick={() => { setGenerated(null); setActiveId(trip.id); }}><span className="trip-emoji">🍜</span><span><strong>{new Date(`${trip.date}T00:00:00`).toLocaleDateString('vi-VN', { day: 'numeric', month: 'long' })}</strong><small>{trip.plan.length} điểm dừng · {trip.source === 'FALLBACK' ? 'Gợi ý theo đánh giá' : 'Gợi ý AI'}</small></span><span>→</span></button>)}</div></DataState></section>
   </div>;
 }

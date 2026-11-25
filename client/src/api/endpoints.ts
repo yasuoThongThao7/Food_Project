@@ -2,7 +2,7 @@ import { request, queryString } from './http';
 import type {
   AdminStats, AdminUser, Article, ArticleInput, AuthResult, FavoriteList, Food, FoodDetail,
   FoodInput, HealthStatus, Itinerary, PageResult, Restaurant, RestaurantDetail, RestaurantInput, Review,
-  SearchHistory, SearchResult, User
+  PredictionResult, SearchHistory, User
 } from './types';
 
 export async function getHealth(): Promise<HealthStatus> {
@@ -21,10 +21,15 @@ export async function getMe(): Promise<User> {
   return (await request<User>('GET /auth/me')).data;
 }
 
-export async function searchImage(image: Blob): Promise<SearchResult> {
+export async function predictImage(image: Blob): Promise<PredictionResult> {
   const body = new FormData();
-  body.append('image', image, 'food-search.jpg');
-  return (await request<SearchResult>('POST /search/image', { method: 'POST', body })).data;
+  body.append('file', image, 'food-prediction.jpg');
+  return (await request<PredictionResult>(
+    'POST /predict',
+    { method: 'POST', body, signal: AbortSignal.timeout(90_000) },
+    true,
+    { retryWithoutAuthOn401: true }
+  )).data;
 }
 
 export async function getSearchHistory(): Promise<SearchHistory[]> {
@@ -74,7 +79,7 @@ export async function removeFavorite(targetType: 'FOOD' | 'RESTAURANT', targetId
   await request<null>(`DELETE /favorites/{targetType}/{targetId}`.replace('{targetType}', targetType).replace('{targetId}', String(targetId)), { method: 'DELETE' });
 }
 
-export async function generateItinerary(input: { date?: string } = {}): Promise<Itinerary> {
+export async function generateItinerary(input: { date?: string; forceNew?: boolean } = {}): Promise<Itinerary> {
   return (await request<Itinerary>('POST /itinerary/generate', { method: 'POST', body: JSON.stringify(input) })).data;
 }
 

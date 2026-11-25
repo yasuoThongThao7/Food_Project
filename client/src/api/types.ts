@@ -78,15 +78,28 @@ export interface Article {
   publishedAt?: string | null;
 }
 
-export interface SearchMatch {
-  food: Food;
+export interface PredictionDish {
+  order: number;
+  class_id: number;
+  class_name: string;
   confidence: number;
-  restaurants: Restaurant[];
+  color: string;
+  source_model: string;
+  bbox: [number, number, number, number];
+  box_percent: { left: number; top: number; width: number; height: number };
 }
 
-export interface SearchResult {
-  foods: SearchMatch[];
-  unmatched: string[];
+export interface PredictionResult {
+  success: boolean;
+  require_retake: boolean;
+  message: string;
+  image_size: { width: number; height: number };
+  inference_time_ms: number;
+  cnn_triggered_boxes: number;
+  total_dishes: number;
+  dishes: PredictionDish[];
+  history_id?: number;
+  image_url?: string;
 }
 
 export interface SearchHistory {

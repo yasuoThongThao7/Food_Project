@@ -159,8 +159,11 @@ h1, h2, h3, p { margin-top: 0; }
 .upload-box p { margin: 0 0 15px; color: #83776b; font-size: 12px; }
 .upload-buttons { display: flex; gap: 9px; flex-wrap: wrap; justify-content: center; }
 .upload-caption { margin-top: 13px; color: #9d9184; font-size: 10px; }
-.upload-preview { width: 100%; height: 224px; position: relative; }
-.upload-preview img { width: 100%; height: 100%; object-fit: contain; }
+.upload-preview { width: 100%; height: 224px; position: relative; display: flex; align-items: center; justify-content: center; }
+.prediction-image { position: relative; max-width: 100%; max-height: 224px; }
+.prediction-image img { display: block; max-width: 100%; max-height: 224px; width: auto; height: auto; }
+.prediction-box { position: absolute; border: 2px solid; pointer-events: none; }
+.prediction-box span { position: absolute; left: -2px; top: -19px; padding: 2px 4px; color: white; font-size: 9px; white-space: nowrap; }
 .remove-image { position: absolute; right: 5px; top: 5px; padding: 8px 12px; border: 0; background: #fffdf2; border-radius: 7px; color: #51483d; cursor: pointer; font-size: 11px; }
 .search-submit { display: flex; width: 100%; margin-top: 12px; padding: 13px; }
 .history-panel { position: sticky; top: 93px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fffdfa; }

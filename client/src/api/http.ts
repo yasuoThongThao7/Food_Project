@@ -5,6 +5,10 @@ export interface Envelope<T> {
   error?: { code: string; message: string };
 }
 
+interface RequestOptions {
+  retryWithoutAuthOn401?: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -17,7 +21,6 @@ export class ApiError extends Error {
 }
 
 const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-const API_PREFIX = '/api';
 const TOKEN_KEY = 'dnfg_token';
 
 export function getToken(): string | null {
@@ -35,7 +38,8 @@ export function clearToken(): void {
 export async function request<T>(
   endpoint: string,
   init: RequestInit = {},
-  authenticated = true
+  authenticated = true,
+  options: RequestOptions = {}
 ): Promise<{ data: T; meta?: Envelope<T>['meta'] }> {
   const path = endpoint.replace(/^(GET|POST|PUT|PATCH|DELETE) /, '');
   const headers = new Headers(init.headers);
@@ -44,7 +48,7 @@ export async function request<T>(
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const response = await fetch(`${API_URL}${API_PREFIX}${path}`, { ...init, headers });
+  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
   let envelope: Envelope<T>;
   try {
     envelope = (await response.json()) as Envelope<T>;
@@ -57,6 +61,9 @@ export async function request<T>(
     if (response.status === 401 || code === 'UNAUTHORIZED') {
       clearToken();
       window.dispatchEvent(new Event('dnfg:logout'));
+      if (options.retryWithoutAuthOn401 && authenticated && token) {
+        return request(endpoint, init, false, { retryWithoutAuthOn401: false });
+      }
       window.location.assign('/login');
     }
     if (code === 'BANNED') {
